@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calorie Tracker</title>
+  <style>
+    :root {
+      --bg: #f8f7f4;
+      --surface: #ffffff;
+      --border: #e8e5e0;
+      --text: #1a1917;
+      --muted: #78716c;
+      --cal-color: #ea580c;
+      --pro-color: #2563eb;
+      --carb-color: #7c3aed;
+      --fat-color: #16a34a;
+      --radius: 12px;
+      --shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.05);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+    }
+
+    /* Header */
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0.875rem 1.5rem; display: flex; align-items: center;
+      justify-content: space-between; position: sticky; top: 0; z-index: 10;
+    }
+    .header-left h1 { font-size: 1.05rem; font-weight: 700; }
+    .header-left .date { font-size: 0.8rem; color: var(--muted); margin-top: 1px; }
+    .header-right { display: flex; gap: 0.5rem; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.45rem 0.9rem; border-radius: 7px; font-size: 0.85rem;
+      font-weight: 500; cursor: pointer; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); transition: all 0.12s;
+      font-family: inherit;
+    }
+    .btn:hover { background: var(--bg); }
+    .btn-primary { background: var(--text); color: #fff; border-color: var(--text); }
+    .btn-primary:hover { opacity: 0.85; background: var(--text); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Main layout */
+    main { max-width: 860px; margin: 0 auto; padding: 1.5rem; }
+
+    /* Macro summary cards */
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    @media (max-width: 600px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } }
+    .macro-card {
+      background: var(--surface); border-radius: var(--radius);
+      padding: 1.1rem 1.1rem 0.9rem; box-shadow: var(--shadow);
+    }
+    .macro-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+                   letter-spacing: 0.07em; margin-bottom: 0.35rem; }
+    .macro-value { font-size: 1.6rem; font-weight: 700; line-height: 1; margin-bottom: 0.5rem; }
+    .macro-sub { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.6rem; }
+    .progress-track { height: 6px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 99px; transition: width 0.5s ease; }
+
+    .macro-card.cal .macro-label { color: var(--cal-color); }
+    .macro-card.cal .progress-fill { background: var(--cal-color); }
+    .macro-card.pro .macro-label { color: var(--pro-color); }
+    .macro-card.pro .progress-fill { background: var(--pro-color); }
+    .macro-card.carb .macro-label { color: var(--carb-color); }
+    .macro-card.carb .progress-fill { background: var(--carb-color); }
+    .macro-card.fat .macro-label { color: var(--fat-color); }
+    .macro-card.fat .progress-fill { background: var(--fat-color); }
+
+    /* Meal cards */
+    .meal-card {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: var(--shadow); margin-bottom: 1rem; overflow: hidden;
+    }
+    .meal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.875rem 1.1rem; border-bottom: 1px solid var(--border);
+    }
+    .meal-name { font-weight: 600; font-size: 0.95rem; }
+    .meal-totals { display: flex; gap: 0.875rem; }
+    .meal-total-item { font-size: 0.75rem; color: var(--muted); text-align: right; }
+    .meal-total-item strong { display: block; font-size: 0.9rem; color: var(--text); }
+
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left; font-size: 0.7rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+      padding: 0.5rem 1.1rem; border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    th:not(:first-child) { text-align: right; }
+    td { padding: 0.55rem 1.1rem; font-size: 0.875rem; border-bottom: 1px solid var(--border); }
+    td:not(:first-child) { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--bg); }
+
+    /* States */
+    .state-box {
+      background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 3rem 2rem; text-align: center;
+    }
+    .state-box .icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .state-box h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .state-box p { font-size: 0.85rem; color: var(--muted); max-width: 400px; margin: 0 auto 1rem; }
+    .spinner {
+      width: 32px; height: 32px; border: 3px solid var(--border);
+      border-top-color: var(--text); border-radius: 50%;
+      animation: spin 0.7s linear infinite; margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Settings modal */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+      display: none; align-items: center; justify-content: center; z-index: 50;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border-radius: var(--radius);
+      padding: 1.5rem; width: 380px; box-shadow: 0 8px 40px rgba(0,0,0,0.15);
+    }
+    .modal h2 { font-size: 1rem; font-weight: 700; margin-bottom: 1.1rem; }
+    .field { margin-bottom: 0.875rem; }
+    .field label { font-size: 0.78rem; color: var(--muted); display: block; margin-bottom: 4px; }
+    .field input {
+      width: 100%; padding: 0.45rem 0.7rem; border-radius: 7px;
+      border: 1px solid var(--border); font-size: 0.85rem; font-family: inherit;
+    }
+    .field input:focus { outline: none; border-color: var(--text); }
+    .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 1.25rem; right: 1.25rem;
+      background: #1c1917; color: #fff; padding: 0.5rem 1rem;
+      border-radius: 8px; font-size: 0.83rem; opacity: 0;
+      transition: opacity 0.25s; pointer-events: none; z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>🥗 Calorie Tracker</h1>
+    <div class="date" id="header-date"></div>
+  </div>
+  <div class="header-right">
+    <button class="btn" onclick="openSettings()">⚙ Targets</button>
+    <button class="btn btn-primary" id="analyze-btn" onclick="analyze()">Analyze today</button>
+  </div>
+</header>
+
+<main id="main">
+  <div class="state-box">
+    <div class="icon">🥗</div>
+    <h2>Ready to analyze</h2>
+    <p>Click <strong>Analyze today</strong> to read your Obsidian daily note and estimate your calories and macros.</p>
+    <p style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem">
+      Make sure your daily note has a <code>## Food</code> section with your meals listed below it.
+    </p>
+  </div>
+</main>
+
+<!-- Settings modal -->
+<div class="overlay" id="settings-modal">
+  <div class="modal">
+    <h2>⚙ Daily Targets</h2>
+    <div class="field">
+      <label>Calories (kcal)</label>
+      <input type="number" id="s-cal" min="0" />
+    </div>
+    <div class="field">
+      <label>Protein (g)</label>
+      <input type="number" id="s-pro" min="0" />
+    </div>
+    <div class="field">
+      <label>Carbs (g)</label>
+      <input type="number" id="s-carb" min="0" />
+    </div>
+    <div class="field">
+      <label>Fat (g)</label>
+      <input type="number" id="s-fat" min="0" />
+    </div>
+    <div class="field">
+      <label>Food section header in daily note</label>
+      <input type="text" id="s-header" placeholder="## Food" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let settings = {};
+let lastAnalysis = null;
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+async function boot() {
+  document.getElementById('header-date').textContent = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  settings = await api('/api/settings');
+}
+
+// ── API ──────────────────────────────────────────────────────────────────────
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: {} };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Request failed');
+  }
+  return res.json();
+}
+
+// ── Analyze ───────────────────────────────────────────────────────────────────
+async function analyze() {
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+  showLoading();
+
+  try {
+    const data = await api('/api/analyze');
+    lastAnalysis = data;
+    renderResults(data.analysis);
+    toast('Analysis complete');
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh';
+  }
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderResults(analysis) {
+  const t = analysis.totals;
+  const targets = settings;
+
+  const html = `
+    <div class="summary-grid">
+      ${macroCard('cal', 'Calories', t.calories, targets.calories, 'kcal', '')}
+      ${macroCard('pro', 'Protein', t.protein, targets.protein, 'g', 'protein')}
+      ${macroCard('carb', 'Carbs', t.carbs, targets.carbs, 'g', 'carbs')}
+      ${macroCard('fat', 'Fat', t.fat, targets.fat, 'g', 'fat')}
+    </div>
+    ${analysis.meals.map(mealCard).join('')}
+  `;
+  document.getElementById('main').innerHTML = html;
+}
+
+function macroCard(cls, label, value, target, unit, suffix) {
+  const pct = target > 0 ? Math.min((value / target) * 100, 100) : 0;
+  const remaining = Math.max(target - value, 0);
+  const over = value > target;
+  const subText = over
+    ? `${value - target}${unit} over target`
+    : `${remaining}${unit} remaining`;
+  return `<div class="macro-card ${cls}">
+    <div class="macro-label">${label}</div>
+    <div class="macro-value">${value}<span style="font-size:1rem;font-weight:400"> ${unit}</span></div>
+    <div class="macro-sub">${subText}</div>
+    <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+function mealCard(meal) {
+  const totals = meal.items.reduce((acc, item) => {
+    acc.calories += item.calories;
+    acc.protein += item.protein;
+    acc.carbs += item.carbs;
+    acc.fat += item.fat;
+    return acc;
+  }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
+
+  const rows = meal.items.map(item => `
+    <tr>
+      <td>${esc(item.food)}</td>
+      <td>${item.calories}</td>
+      <td>${item.protein}g</td>
+      <td>${item.carbs}g</td>
+      <td>${item.fat}g</td>
+    </tr>
+  `).join('');
+
+  return `<div class="meal-card">
+    <div class="meal-header">
+      <span class="meal-name">${esc(meal.name)}</span>
+      <div class="meal-totals">
+        <div class="meal-total-item"><strong>${totals.calories}</strong>kcal</div>
+        <div class="meal-total-item"><strong>${totals.protein}g</strong>protein</div>
+        <div class="meal-total-item"><strong>${totals.carbs}g</strong>carbs</div>
+        <div class="meal-total-item"><strong>${totals.fat}g</strong>fat</div>
+      </div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Food</th><th>Cal</th><th>Protein</th><th>Carbs</th><th>Fat</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+// ── States ────────────────────────────────────────────────────────────────────
+function showLoading() {
+  document.getElementById('main').innerHTML = `
+    <div class="state-box">
+      <div class="spinner"></div>
+      <h2>Analyzing your food log…</h2>
+      <p>Reading your daily note and estimating nutrition.</p>
+    </div>`;
+}
+
+function showError(msg) {
+  document.getElementById('main').innerHTML = `
+    <div class="state-box">
+      <div class="icon">⚠️</div>
+      <h2>Could not analyze</h2>
+      <p>${esc(msg)}</p>
+      <button class="btn btn-primary" onclick="analyze()">Try again</button>
+    </div>`;
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('s-cal').value = settings.calories ?? 2000;
+  document.getElementById('s-pro').value = settings.protein ?? 150;
+  document.getElementById('s-carb').value = settings.carbs ?? 200;
+  document.getElementById('s-fat').value = settings.fat ?? 65;
+  document.getElementById('s-header').value = settings.food_header ?? '## Food';
+  document.getElementById('settings-modal').classList.add('open');
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.remove('open');
+}
+
+async function saveSettings() {
+  const updated = {
+    calories: parseInt(document.getElementById('s-cal').value),
+    protein: parseInt(document.getElementById('s-pro').value),
+    carbs: parseInt(document.getElementById('s-carb').value),
+    fat: parseInt(document.getElementById('s-fat').value),
+    food_header: document.getElementById('s-header').value.trim(),
+  };
+  try {
+    settings = await api('/api/settings', 'PUT', updated);
+    closeSettings();
+    toast('Targets saved');
+    if (lastAnalysis) renderResults(lastAnalysis.analysis);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+let toastTimer;
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = isError ? '#dc2626' : '#1c1917';
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+boot();
+</script>
+</body>
+</html>
