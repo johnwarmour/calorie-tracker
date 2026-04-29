@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import sqlite3
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -15,6 +17,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 SETTINGS_PATH = Path("settings.json")
+DB_PATH = Path("tracker.db")
 DEFAULT_SETTINGS = {
     "calories": 2000,
     "protein": 150,
@@ -27,9 +30,53 @@ app = FastAPI(title="Calorie Tracker")
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
-@app.get("/")
-def root():
-    return FileResponse("frontend/index.html")
+# ── Database ───────────────────────────────────────────────────────────────────
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_log (
+                date        TEXT PRIMARY KEY,
+                analysis    TEXT NOT NULL,
+                food_text   TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+        """)
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+def upsert_log(log_date: str, analysis: dict, food_text: str):
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO daily_log (date, analysis, food_text, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(date) DO UPDATE SET
+                analysis   = excluded.analysis,
+                food_text  = excluded.food_text,
+                updated_at = excluded.updated_at
+        """, (log_date, json.dumps(analysis), food_text))
+
+def get_history(limit: int = 30) -> list:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT date, analysis FROM daily_log ORDER BY date DESC LIMIT ?", (limit,)
+        ).fetchall()
+    result = []
+    for row in rows:
+        analysis = json.loads(row["analysis"])
+        result.append({
+            "date": row["date"],
+            "totals": analysis.get("totals", {}),
+        })
+    return result
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -42,6 +89,11 @@ def load_settings() -> dict:
 
 def save_settings(data: dict):
     SETTINGS_PATH.write_text(json.dumps(data, indent=2))
+
+
+@app.get("/")
+def root():
+    return FileResponse("frontend/index.html")
 
 
 @app.get("/api/settings")
@@ -78,7 +130,6 @@ def read_food_section(vault_path: str, notes_folder: str, food_header: str) -> O
     if start is None:
         return None
 
-    # Collect lines until next same-level or higher header
     header_level = len(food_header) - len(food_header.lstrip("#"))
     section = []
     for line in lines[start:]:
@@ -135,7 +186,7 @@ def analyze_food(food_text: str) -> dict:
     return json.loads(raw)
 
 
-# ── Analyze endpoint ───────────────────────────────────────────────────────────
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/analyze")
 def analyze():
@@ -162,8 +213,18 @@ def analyze():
     except Exception as e:
         raise HTTPException(500, str(e))
 
-    return {"analysis": result, "date": date.today().isoformat(), "food_text": food_text}
+    log_date = date.today().isoformat()
+    upsert_log(log_date, result, food_text)
 
+    return {"analysis": result, "date": log_date, "food_text": food_text}
+
+
+@app.get("/api/history")
+def history():
+    return get_history()
+
+
+init_db()
 
 if __name__ == "__main__":
     import uvicorn

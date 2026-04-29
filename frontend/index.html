@@ -34,6 +34,20 @@
     .header-left .date { font-size: 0.8rem; color: var(--muted); margin-top: 1px; }
     .header-right { display: flex; gap: 0.5rem; }
 
+    /* Tabs */
+    .tabs {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border);
+      background: var(--surface); padding: 0 1.5rem;
+    }
+    .tab {
+      padding: 0.65rem 1rem; font-size: 0.85rem; font-weight: 500;
+      cursor: pointer; border: none; background: none; color: var(--muted);
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+      font-family: inherit; transition: all 0.12s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--text); }
+
     /* Buttons */
     .btn {
       display: inline-flex; align-items: center; gap: 0.35rem;
@@ -118,6 +132,55 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* History */
+    .history-section { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+    .history-toolbar {
+      padding: 0.875rem 1.1rem; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .history-toolbar h2 { font-size: 0.9rem; font-weight: 600; }
+    .macro-toggle { display: flex; gap: 0.4rem; }
+    .macro-pill {
+      padding: 0.2rem 0.6rem; border-radius: 99px; font-size: 0.72rem;
+      font-weight: 600; cursor: pointer; border: 1.5px solid; transition: all 0.12s;
+      font-family: inherit;
+    }
+    .macro-pill.cal  { border-color: var(--cal-color);  color: var(--cal-color); }
+    .macro-pill.pro  { border-color: var(--pro-color);  color: var(--pro-color); }
+    .macro-pill.carb { border-color: var(--carb-color); color: var(--carb-color); }
+    .macro-pill.fat  { border-color: var(--fat-color);  color: var(--fat-color); }
+    .macro-pill.active.cal  { background: var(--cal-color);  color: #fff; }
+    .macro-pill.active.pro  { background: var(--pro-color);  color: #fff; }
+    .macro-pill.active.carb { background: var(--carb-color); color: #fff; }
+    .macro-pill.active.fat  { background: var(--fat-color);  color: #fff; }
+
+    /* Chart */
+    .chart-wrap { padding: 1.25rem 1.1rem 0.5rem; overflow-x: auto; }
+    .chart { display: flex; align-items: flex-end; gap: 6px; height: 160px; min-width: max-content; }
+    .chart-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 38px; }
+    .bar-group { display: flex; gap: 2px; align-items: flex-end; height: 140px; }
+    .bar {
+      width: 8px; border-radius: 3px 3px 0 0; transition: height 0.4s ease;
+      position: relative; cursor: default;
+    }
+    .bar.cal  { background: var(--cal-color); }
+    .bar.pro  { background: var(--pro-color); }
+    .bar.carb { background: var(--carb-color); }
+    .bar.fat  { background: var(--fat-color); }
+    .bar.hidden { display: none; }
+    .chart-label { font-size: 0.62rem; color: var(--muted); white-space: nowrap; }
+    .target-line {
+      position: relative; border-top: 1.5px dashed rgba(0,0,0,0.15);
+      margin: 0 1.1rem; font-size: 0.65rem; color: var(--muted); text-align: right;
+      padding-top: 2px;
+    }
+
+    /* History table */
+    .history-table { border-top: 1px solid var(--border); }
+    .history-table table { width: 100%; }
+    .history-table th { background: var(--bg); }
+    .history-table td:first-child { font-weight: 500; }
+
     /* Settings modal */
     .overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.35);
@@ -161,6 +224,11 @@
   </div>
 </header>
 
+<div class="tabs">
+  <button class="tab active" id="tab-today" onclick="showTab('today')">Today</button>
+  <button class="tab" id="tab-history" onclick="showTab('history')">History</button>
+</div>
+
 <main id="main">
   <div class="state-box">
     <div class="icon">🥗</div>
@@ -169,6 +237,14 @@
     <p style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem">
       Make sure your daily note has a <code>## Food</code> section with your meals listed below it.
     </p>
+  </div>
+</main>
+
+<main id="main-history" style="display:none">
+  <div class="state-box">
+    <div class="spinner"></div>
+    <h2>Loading history…</h2>
+    <p></p>
   </div>
 </main>
 
@@ -208,6 +284,8 @@
 <script>
 let settings = {};
 let lastAnalysis = null;
+let activeTab = 'today';
+let activeMacros = { cal: true, pro: true, carb: false, fat: false };
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -215,6 +293,17 @@ async function boot() {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
   settings = await api('/api/settings');
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showTab(tab) {
+  activeTab = tab;
+  document.getElementById('main').style.display = tab === 'today' ? '' : 'none';
+  document.getElementById('main-history').style.display = tab === 'history' ? '' : 'none';
+  document.getElementById('tab-today').classList.toggle('active', tab === 'today');
+  document.getElementById('tab-history').classList.toggle('active', tab === 'history');
+  document.getElementById('analyze-btn').style.display = tab === 'today' ? '' : 'none';
+  if (tab === 'history') loadHistory();
 }
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -240,7 +329,7 @@ async function analyze() {
     const data = await api('/api/analyze');
     lastAnalysis = data;
     renderResults(data.analysis);
-    toast('Analysis complete');
+    toast('Analysis complete — saved');
   } catch (err) {
     showError(err.message);
   } finally {
@@ -249,24 +338,24 @@ async function analyze() {
   }
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
+// ── Render today ──────────────────────────────────────────────────────────────
 function renderResults(analysis) {
   const t = analysis.totals;
   const targets = settings;
 
   const html = `
     <div class="summary-grid">
-      ${macroCard('cal', 'Calories', t.calories, targets.calories, 'kcal', '')}
-      ${macroCard('pro', 'Protein', t.protein, targets.protein, 'g', 'protein')}
-      ${macroCard('carb', 'Carbs', t.carbs, targets.carbs, 'g', 'carbs')}
-      ${macroCard('fat', 'Fat', t.fat, targets.fat, 'g', 'fat')}
+      ${macroCard('cal', 'Calories', t.calories, targets.calories, 'kcal')}
+      ${macroCard('pro', 'Protein', t.protein, targets.protein, 'g')}
+      ${macroCard('carb', 'Carbs', t.carbs, targets.carbs, 'g')}
+      ${macroCard('fat', 'Fat', t.fat, targets.fat, 'g')}
     </div>
     ${analysis.meals.map(mealCard).join('')}
   `;
   document.getElementById('main').innerHTML = html;
 }
 
-function macroCard(cls, label, value, target, unit, suffix) {
+function macroCard(cls, label, value, target, unit) {
   const pct = target > 0 ? Math.min((value / target) * 100, 100) : 0;
   const remaining = Math.max(target - value, 0);
   const over = value > target;
@@ -284,9 +373,9 @@ function macroCard(cls, label, value, target, unit, suffix) {
 function mealCard(meal) {
   const totals = meal.items.reduce((acc, item) => {
     acc.calories += item.calories;
-    acc.protein += item.protein;
-    acc.carbs += item.carbs;
-    acc.fat += item.fat;
+    acc.protein  += item.protein;
+    acc.carbs    += item.carbs;
+    acc.fat      += item.fat;
     return acc;
   }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
 
@@ -319,6 +408,116 @@ function mealCard(meal) {
   </div>`;
 }
 
+// ── History ───────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const container = document.getElementById('main-history');
+  container.innerHTML = `<div class="state-box"><div class="spinner"></div><h2>Loading history…</h2><p></p></div>`;
+  try {
+    const rows = await api('/api/history');
+    if (!rows.length) {
+      container.innerHTML = `<div class="state-box"><div class="icon">📭</div><h2>No history yet</h2><p>Analyze a day to start tracking trends.</p></div>`;
+      return;
+    }
+    renderHistory(rows, container);
+  } catch (err) {
+    container.innerHTML = `<div class="state-box"><div class="icon">⚠️</div><h2>Could not load history</h2><p>${esc(err.message)}</p></div>`;
+  }
+}
+
+function renderHistory(rows, container) {
+  // rows newest-first; chart wants oldest-first
+  const chronological = [...rows].reverse();
+  container.innerHTML = `
+    <div class="history-section">
+      <div class="history-toolbar">
+        <h2>Last ${rows.length} day${rows.length === 1 ? '' : 's'}</h2>
+        <div class="macro-toggle">
+          ${pill('cal',  'Cal')}
+          ${pill('pro',  'Pro')}
+          ${pill('carb', 'Carb')}
+          ${pill('fat',  'Fat')}
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart" id="history-chart"></div>
+      </div>
+      <div class="history-table">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Calories</th><th>Protein</th><th>Carbs</th><th>Fat</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr>
+              <td>${formatDate(r.date)}</td>
+              <td>${r.totals.calories ?? '—'} kcal</td>
+              <td>${r.totals.protein ?? '—'} g</td>
+              <td>${r.totals.carbs ?? '—'} g</td>
+              <td>${r.totals.fat ?? '—'} g</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  drawChart(chronological);
+}
+
+function pill(cls, label) {
+  const active = activeMacros[cls] ? 'active' : '';
+  return `<button class="macro-pill ${cls} ${active}" onclick="toggleMacro('${cls}')">${label}</button>`;
+}
+
+function toggleMacro(cls) {
+  activeMacros[cls] = !activeMacros[cls];
+  // re-render pills and chart without full reload
+  document.querySelectorAll('.macro-pill').forEach(el => {
+    const c = [...el.classList].find(x => ['cal','pro','carb','fat'].includes(x));
+    if (c) el.classList.toggle('active', !!activeMacros[c]);
+  });
+  document.querySelectorAll('.bar').forEach(el => {
+    const c = [...el.classList].find(x => ['cal','pro','carb','fat'].includes(x));
+    if (c) el.classList.toggle('hidden', !activeMacros[c]);
+  });
+}
+
+function drawChart(rows) {
+  const targets = { cal: settings.calories, pro: settings.protein, carb: settings.carbs, fat: settings.fat };
+  const maxVals = {
+    cal:  Math.max(...rows.map(r => r.totals.calories || 0), targets.cal),
+    pro:  Math.max(...rows.map(r => r.totals.protein  || 0), targets.pro),
+    carb: Math.max(...rows.map(r => r.totals.carbs    || 0), targets.carb),
+    fat:  Math.max(...rows.map(r => r.totals.fat      || 0), targets.fat),
+  };
+  const MAX_H = 140; // px
+
+  const cols = rows.map(r => {
+    const vals = {
+      cal:  r.totals.calories || 0,
+      pro:  r.totals.protein  || 0,
+      carb: r.totals.carbs    || 0,
+      fat:  r.totals.fat      || 0,
+    };
+    const bars = ['cal','pro','carb','fat'].map(c => {
+      const h = maxVals[c] > 0 ? Math.round((vals[c] / maxVals[c]) * MAX_H) : 0;
+      const hidden = activeMacros[c] ? '' : 'hidden';
+      return `<div class="bar ${c} ${hidden}" style="height:${h}px" title="${c}: ${vals[c]}"></div>`;
+    }).join('');
+
+    const label = r.date.slice(5); // MM-DD
+    return `<div class="chart-col">
+      <div class="bar-group">${bars}</div>
+      <div class="chart-label">${label}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('history-chart').innerHTML = cols;
+}
+
+function formatDate(iso) {
+  const [y, m, d] = iso.split('-');
+  return new Date(+y, +m - 1, +d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 // ── States ────────────────────────────────────────────────────────────────────
 function showLoading() {
   document.getElementById('main').innerHTML = `
@@ -341,10 +540,10 @@ function showError(msg) {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function openSettings() {
-  document.getElementById('s-cal').value = settings.calories ?? 2000;
-  document.getElementById('s-pro').value = settings.protein ?? 150;
-  document.getElementById('s-carb').value = settings.carbs ?? 200;
-  document.getElementById('s-fat').value = settings.fat ?? 65;
+  document.getElementById('s-cal').value  = settings.calories   ?? 2000;
+  document.getElementById('s-pro').value  = settings.protein    ?? 150;
+  document.getElementById('s-carb').value = settings.carbs      ?? 200;
+  document.getElementById('s-fat').value  = settings.fat        ?? 65;
   document.getElementById('s-header').value = settings.food_header ?? '## Food';
   document.getElementById('settings-modal').classList.add('open');
 }
@@ -356,9 +555,9 @@ function closeSettings() {
 async function saveSettings() {
   const updated = {
     calories: parseInt(document.getElementById('s-cal').value),
-    protein: parseInt(document.getElementById('s-pro').value),
-    carbs: parseInt(document.getElementById('s-carb').value),
-    fat: parseInt(document.getElementById('s-fat').value),
+    protein:  parseInt(document.getElementById('s-pro').value),
+    carbs:    parseInt(document.getElementById('s-carb').value),
+    fat:      parseInt(document.getElementById('s-fat').value),
     food_header: document.getElementById('s-header').value.trim(),
   };
   try {
