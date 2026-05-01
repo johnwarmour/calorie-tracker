@@ -144,6 +144,75 @@ def read_food_section(vault_path: str, notes_folder: str, food_header: str) -> O
     return content if content else None
 
 
+# ── Write summary back to note ─────────────────────────────────────────────────
+
+SUMMARY_START = "<!-- calorie-summary:start -->"
+SUMMARY_END   = "<!-- calorie-summary:end -->"
+
+
+def write_summary_to_note(vault_path: str, notes_folder: str, food_header: str, analysis: dict):
+    today = date.today().strftime("%Y-%m-%d")
+    note_path = Path(vault_path) / notes_folder / f"{today}.md"
+    if not note_path.exists():
+        return
+
+    text = note_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    header_lower = food_header.strip().lower()
+
+    # Find the food section start
+    section_start = None
+    for i, line in enumerate(lines):
+        if line.strip().lower() == header_lower:
+            section_start = i
+            break
+    if section_start is None:
+        return
+
+    # Find where the food section ends (next same-or-higher header)
+    header_level = len(food_header) - len(food_header.lstrip("#"))
+    section_end = len(lines)
+    for i in range(section_start + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("#"):
+            depth = len(stripped) - len(stripped.lstrip("#"))
+            if depth <= header_level:
+                section_end = i
+                break
+
+    # Build summary block
+    t = analysis["totals"]
+    summary_lines = [
+        SUMMARY_START,
+        f"> **Calorie Summary** — {t['calories']} kcal | "
+        f"Protein: {t['protein']}g | Carbs: {t['carbs']}g | Fat: {t['fat']}g",
+        SUMMARY_END,
+    ]
+
+    # Strip any existing summary from within the section
+    food_section = lines[section_start:section_end]
+    cleaned = []
+    inside = False
+    for line in food_section:
+        if line.strip() == SUMMARY_START:
+            inside = True
+            continue
+        if line.strip() == SUMMARY_END:
+            inside = False
+            continue
+        if not inside:
+            cleaned.append(line)
+
+    # Drop trailing blank lines before appending summary
+    while cleaned and not cleaned[-1].strip():
+        cleaned.pop()
+
+    updated_section = cleaned + [""] + summary_lines
+
+    new_lines = lines[:section_start] + updated_section + lines[section_end:]
+    note_path.write_text("\n".join(new_lines), encoding="utf-8")
+
+
 # ── Claude analysis ────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
@@ -215,6 +284,7 @@ def analyze():
 
     log_date = date.today().isoformat()
     upsert_log(log_date, result, food_text)
+    write_summary_to_note(vault, folder, settings["food_header"], result)
 
     return {"analysis": result, "date": log_date, "food_text": food_text}
 
