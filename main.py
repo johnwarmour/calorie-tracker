@@ -1,13 +1,14 @@
 import json
 import os
 import re
-import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Optional
 
 import anthropic
+import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -17,7 +18,6 @@ from pydantic import BaseModel
 load_dotenv()
 
 SETTINGS_PATH = Path("settings.json")
-DB_PATH = Path("tracker.db")
 DEFAULT_SETTINGS = {
     "calories": 2000,
     "protein": 150,
@@ -32,51 +32,57 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 # ── Database ───────────────────────────────────────────────────────────────────
 
-def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS daily_log (
-                date        TEXT PRIMARY KEY,
-                analysis    TEXT NOT NULL,
-                food_text   TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            )
-        """)
-
 @contextmanager
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(
+        os.environ["DATABASE_URL"],
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
     try:
         yield conn
         conn.commit()
     finally:
         conn.close()
 
+
+def init_db():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS daily_log (
+                    date       TEXT PRIMARY KEY,
+                    analysis   TEXT NOT NULL,
+                    food_text  TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+
+
 def upsert_log(log_date: str, analysis: dict, food_text: str):
     with get_db() as conn:
-        conn.execute("""
-            INSERT INTO daily_log (date, analysis, food_text, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
-            ON CONFLICT(date) DO UPDATE SET
-                analysis   = excluded.analysis,
-                food_text  = excluded.food_text,
-                updated_at = excluded.updated_at
-        """, (log_date, json.dumps(analysis), food_text))
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO daily_log (date, analysis, food_text, updated_at)
+                VALUES (%s, %s, %s, now())
+                ON CONFLICT (date) DO UPDATE SET
+                    analysis   = EXCLUDED.analysis,
+                    food_text  = EXCLUDED.food_text,
+                    updated_at = now()
+            """, (log_date, json.dumps(analysis), food_text))
+
 
 def get_history(limit: int = 30) -> list:
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT date, analysis FROM daily_log ORDER BY date DESC LIMIT ?", (limit,)
-        ).fetchall()
-    result = []
-    for row in rows:
-        analysis = json.loads(row["analysis"])
-        result.append({
-            "date": row["date"],
-            "totals": analysis.get("totals", {}),
-        })
-    return result
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT date, analysis FROM daily_log ORDER BY date DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+    return [
+        {"date": row["date"], "totals": json.loads(row["analysis"]).get("totals", {})}
+        for row in rows
+    ]
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
