@@ -209,6 +209,51 @@
       transition: opacity 0.25s; pointer-events: none; z-index: 100;
     }
     #toast.show { opacity: 1; }
+
+    /* ══════════════════════════════════════════════
+       MOBILE  (≤ 640px)
+    ══════════════════════════════════════════════ */
+    @media (max-width: 640px) {
+      .btn-label-full { display: none !important; }
+      .btn-label-short { display: inline !important; }
+
+      header { padding: 0.65rem 1rem; }
+      .header-left h1 { font-size: 0.95rem; }
+      .header-left .date { display: none; }
+      .btn { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+
+      .tabs { padding: 0 0.75rem; }
+      .tab { padding: 0.6rem 0.75rem; font-size: 0.8rem; }
+
+      main { padding: 1rem 0.75rem; }
+
+      /* Macro cards already go 2-col at 600px — tighten padding */
+      .macro-card { padding: 0.875rem 0.875rem 0.75rem; }
+      .macro-value { font-size: 1.35rem; }
+
+      /* Meal header stacks on small screens */
+      .meal-header { flex-direction: column; align-items: flex-start; gap: 0.4rem; padding: 0.75rem 0.9rem; }
+      .meal-totals { gap: 0.75rem; }
+      .meal-total-item { text-align: left; }
+
+      /* Make tables scroll horizontally rather than overflow */
+      .meal-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      th { padding: 0.45rem 0.75rem; font-size: 0.65rem; }
+      td { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+
+      /* History table scroll */
+      .history-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .history-toolbar { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+
+      /* Chart slightly taller columns for finger-friendly reading */
+      .chart-wrap { padding: 1rem 0.75rem 0.5rem; }
+
+      /* Modal full width */
+      .modal { width: calc(100vw - 1.5rem); padding: 1.25rem; }
+
+      /* State box tighter */
+      .state-box { padding: 2rem 1.25rem; }
+    }
   </style>
 </head>
 <body>
@@ -220,7 +265,9 @@
   </div>
   <div class="header-right">
     <button class="btn" onclick="openSettings()">⚙ Targets</button>
-    <button class="btn btn-primary" id="analyze-btn" onclick="analyze()">Analyze today</button>
+    <button class="btn btn-primary" id="analyze-btn" onclick="analyze()">
+      <span class="btn-label-full">Analyze today</span><span class="btn-label-short" style="display:none">Analyze</span>
+    </button>
   </div>
 </header>
 
@@ -322,7 +369,8 @@ async function api(path, method = 'GET', body = null) {
 async function analyze() {
   const btn = document.getElementById('analyze-btn');
   btn.disabled = true;
-  btn.textContent = 'Analyzing…';
+  btn.querySelector('.btn-label-full').textContent = 'Analyzing…';
+  btn.querySelector('.btn-label-short').textContent = 'Analyzing…';
   showLoading();
 
   try {
@@ -334,7 +382,8 @@ async function analyze() {
     showError(err.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Refresh';
+    btn.querySelector('.btn-label-full').textContent = 'Refresh';
+    btn.querySelector('.btn-label-short').textContent = 'Refresh';
   }
 }
 
