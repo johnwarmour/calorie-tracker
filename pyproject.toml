@@ -9,4 +9,5 @@ dependencies = [
     "python-dotenv",
     "pydantic",
     "psycopg2-binary",
+    "passlib[bcrypt]",
 ]

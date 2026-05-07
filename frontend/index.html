@@ -210,6 +210,59 @@
     }
     #toast.show { opacity: 1; }
 
+    /* User picker */
+    .user-picker-overlay {
+      position: fixed; inset: 0; background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200; flex-direction: column; gap: 1.5rem; padding: 2rem;
+    }
+    .user-picker-overlay.hidden { display: none; }
+    .user-picker-box {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: var(--shadow); padding: 2rem; width: 100%; max-width: 360px;
+    }
+    .user-picker-box h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .user-picker-box p { font-size: 0.82rem; color: var(--muted); margin-bottom: 1.25rem; }
+    .user-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+    .user-btn {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.75rem 1rem; border-radius: 8px; border: 1.5px solid var(--border);
+      background: var(--surface); font-family: inherit; font-size: 0.9rem;
+      font-weight: 500; cursor: pointer; transition: all 0.12s; text-align: left;
+      color: var(--text);
+    }
+    .user-btn:hover { border-color: var(--text); background: var(--bg); }
+    .user-avatar {
+      width: 32px; height: 32px; border-radius: 50%; background: var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem; font-weight: 700; color: var(--muted); flex-shrink: 0;
+    }
+    .add-user-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+    .add-user-row input {
+      flex: 1; padding: 0.45rem 0.7rem; border-radius: 7px;
+      border: 1px solid var(--border); font-size: 0.85rem; font-family: inherit;
+    }
+    .add-user-row input:focus { outline: none; border-color: var(--text); }
+
+    /* Password prompt inside picker */
+    .pw-prompt { display: none; flex-direction: column; gap: 0.75rem; }
+    .pw-prompt.visible { display: flex; }
+    .pw-prompt input {
+      width: 100%; padding: 0.5rem 0.75rem; border-radius: 7px;
+      border: 1px solid var(--border); font-size: 0.9rem; font-family: inherit;
+    }
+    .pw-prompt input:focus { outline: none; border-color: var(--text); }
+    .pw-back { font-size: 0.78rem; color: var(--muted); cursor: pointer; text-decoration: underline; background: none; border: none; font-family: inherit; }
+
+    /* Current user chip in header */
+    .user-chip {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.78rem; color: var(--muted); cursor: pointer;
+      padding: 0.25rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--bg); transition: all 0.12s;
+    }
+    .user-chip:hover { border-color: var(--text); color: var(--text); }
+
     /* ══════════════════════════════════════════════
        MOBILE  (≤ 640px)
     ══════════════════════════════════════════════ */
@@ -264,6 +317,9 @@
     <div class="date" id="header-date"></div>
   </div>
   <div class="header-right">
+    <button class="user-chip" id="user-chip" onclick="switchUser()" style="display:none">
+      <span id="user-chip-name"></span> ↕
+    </button>
     <button class="btn" onclick="openSettings()">⚙ Targets</button>
     <button class="btn btn-primary" id="analyze-btn" onclick="analyze()">
       <span class="btn-label-full">Analyze today</span><span class="btn-label-short" style="display:none">Analyze</span>
@@ -319,9 +375,50 @@
       <label>Food section header in daily note</label>
       <input type="text" id="s-header" placeholder="## Food" />
     </div>
+    <div style="border-top:1px solid var(--border);padding-top:0.875rem;margin-top:0.25rem">
+      <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);margin-bottom:0.75rem">My Obsidian</div>
+      <div class="field">
+        <label>Vault path</label>
+        <input type="text" id="s-vault" placeholder="/Users/you/MyVault" />
+      </div>
+      <div class="field">
+        <label>Daily notes folder</label>
+        <input type="text" id="s-folder" placeholder="Daily" />
+      </div>
+    </div>
+    <div class="field" style="border-top:1px solid var(--border);padding-top:0.875rem;margin-top:0.25rem">
+      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+        <input type="checkbox" id="s-auth" style="width:auto" />
+        Require password to select user
+      </label>
+    </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeSettings()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- User picker overlay -->
+<div class="user-picker-overlay" id="user-picker">
+  <div class="user-picker-box">
+    <h2>🥗 Calorie Tracker</h2>
+    <p id="picker-subtitle">Who's tracking today?</p>
+
+    <!-- User list -->
+    <div class="user-list" id="user-list"></div>
+
+    <!-- Password prompt (shown after selecting a user when auth is on) -->
+    <div class="pw-prompt" id="pw-prompt">
+      <input type="password" id="pw-input" placeholder="Password" onkeydown="pwKey(event)" />
+      <button class="btn btn-primary" onclick="submitPassword()">Sign in</button>
+      <button class="pw-back" onclick="showUserList()">← Back</button>
+    </div>
+
+    <!-- Add new user -->
+    <div class="add-user-row">
+      <input id="new-user-input" placeholder="New user name…" onkeydown="newUserKey(event)" />
+      <button class="btn" onclick="createUser()">Add</button>
     </div>
   </div>
 </div>
@@ -334,12 +431,125 @@ let lastAnalysis = null;
 let activeTab = 'today';
 let activeMacros = { cal: true, pro: true, carb: false, fat: false };
 
+// current session: { id, name, token } or null
+let currentUser = null;   // { id, name, token, obsidian_vault_path, obsidian_daily_notes_folder }
+let pendingUserId = null; // set while waiting for password entry
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
   document.getElementById('header-date').textContent = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
   settings = await api('/api/settings');
+
+  // Restore session from localStorage
+  const saved = localStorage.getItem('ct_user');
+  if (saved) {
+    currentUser = JSON.parse(saved);
+    await loadUserProfile();
+    showApp();
+  } else {
+    await openUserPicker();
+  }
+}
+
+// ── User picker ───────────────────────────────────────────────────────────────
+async function openUserPicker() {
+  document.getElementById('user-picker').classList.remove('hidden');
+  showUserList();
+  const users = await api('/api/users');
+  const list = document.getElementById('user-list');
+  if (!users.length) {
+    list.innerHTML = '<div style="font-size:0.82rem;color:var(--muted);text-align:center;padding:0.5rem 0">No users yet — add one below</div>';
+    return;
+  }
+  list.innerHTML = users.map(u => `
+    <button class="user-btn" onclick="selectUser(${u.id}, '${esc(u.name)}')">
+      <div class="user-avatar">${u.name[0].toUpperCase()}</div>
+      ${esc(u.name)}
+    </button>
+  `).join('');
+}
+
+function showUserList() {
+  document.getElementById('user-list').style.display = '';
+  document.getElementById('pw-prompt').classList.remove('visible');
+  document.getElementById('picker-subtitle').textContent = 'Who\'s tracking today?';
+  pendingUserId = null;
+}
+
+async function selectUser(id, name) {
+  if (settings.auth_enabled) {
+    pendingUserId = { id, name };
+    document.getElementById('user-list').style.display = 'none';
+    document.getElementById('picker-subtitle').textContent = `Sign in as ${name}`;
+    document.getElementById('pw-input').value = '';
+    document.getElementById('pw-prompt').classList.add('visible');
+    document.getElementById('pw-input').focus();
+  } else {
+    currentUser = { id, name, token: null };
+    localStorage.setItem('ct_user', JSON.stringify(currentUser));
+    await loadUserProfile();
+    showApp();
+  }
+}
+
+function pwKey(e) { if (e.key === 'Enter') submitPassword(); }
+
+async function submitPassword() {
+  const password = document.getElementById('pw-input').value;
+  if (!pendingUserId || !password) return;
+  try {
+    const res = await api('/api/auth/login', 'POST', { user_id: pendingUserId.id, password });
+    currentUser = { id: pendingUserId.id, name: pendingUserId.name, token: res.token };
+    localStorage.setItem('ct_user', JSON.stringify(currentUser));
+    await loadUserProfile();
+    showApp();
+  } catch (err) {
+    document.getElementById('pw-input').value = '';
+    document.getElementById('pw-input').placeholder = 'Incorrect password — try again';
+    document.getElementById('pw-input').focus();
+  }
+}
+
+async function loadUserProfile() {
+  try {
+    const profile = await api('/api/users/me');
+    currentUser = { ...currentUser, ...profile };
+    localStorage.setItem('ct_user', JSON.stringify(currentUser));
+  } catch {}
+}
+
+function showApp() {
+  document.getElementById('user-picker').classList.add('hidden');
+  const chip = document.getElementById('user-chip');
+  chip.style.display = '';
+  document.getElementById('user-chip-name').textContent = currentUser.name;
+}
+
+function switchUser() {
+  // Clear session
+  if (currentUser?.token) {
+    api('/api/auth/logout', 'POST').catch(() => {});
+  }
+  currentUser = null;
+  localStorage.removeItem('ct_user');
+  openUserPicker();
+}
+
+async function newUserKey(e) { if (e.key === 'Enter') await createUser(); }
+
+async function createUser() {
+  const input = document.getElementById('new-user-input');
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    await api('/api/users', 'POST', { name });
+    input.value = '';
+    await openUserPicker();
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -357,9 +567,22 @@ function showTab(tab) {
 async function api(path, method = 'GET', body = null) {
   const opts = { method, headers: {} };
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  if (currentUser) {
+    if (currentUser.token) {
+      opts.headers['X-Session-Token'] = currentUser.token;
+    } else {
+      opts.headers['X-User-Id'] = String(currentUser.id);
+    }
+  }
   const res = await fetch(path, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    // Session expired — force re-login
+    if (res.status === 401) {
+      currentUser = null;
+      localStorage.removeItem('ct_user');
+      openUserPicker();
+    }
     throw new Error(err.detail || 'Request failed');
   }
   return res.json();
@@ -594,6 +817,9 @@ function openSettings() {
   document.getElementById('s-carb').value = settings.carbs      ?? 200;
   document.getElementById('s-fat').value  = settings.fat        ?? 65;
   document.getElementById('s-header').value = settings.food_header ?? '## Food';
+  document.getElementById('s-vault').value  = currentUser?.obsidian_vault_path ?? '';
+  document.getElementById('s-folder').value = currentUser?.obsidian_daily_notes_folder ?? 'Daily';
+  document.getElementById('s-auth').checked = !!settings.auth_enabled;
   document.getElementById('settings-modal').classList.add('open');
 }
 
@@ -608,11 +834,21 @@ async function saveSettings() {
     carbs:    parseInt(document.getElementById('s-carb').value),
     fat:      parseInt(document.getElementById('s-fat').value),
     food_header: document.getElementById('s-header').value.trim(),
+    auth_enabled: document.getElementById('s-auth').checked,
   };
   try {
-    settings = await api('/api/settings', 'PUT', updated);
+    const [newSettings, profile] = await Promise.all([
+      api('/api/settings', 'PUT', updated),
+      api('/api/users/me', 'PUT', {
+        obsidian_vault_path: document.getElementById('s-vault').value.trim(),
+        obsidian_daily_notes_folder: document.getElementById('s-folder').value.trim() || 'Daily',
+      }),
+    ]);
+    settings = newSettings;
+    currentUser = { ...currentUser, ...profile };
+    localStorage.setItem('ct_user', JSON.stringify(currentUser));
     closeSettings();
-    toast('Targets saved');
+    toast('Settings saved');
     if (lastAnalysis) renderResults(lastAnalysis.analysis);
   } catch (err) {
     toast(err.message, true);

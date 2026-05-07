@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import secrets
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -10,9 +11,10 @@ import anthropic
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from passlib.hash import bcrypt
 from pydantic import BaseModel
 
 load_dotenv()
@@ -24,6 +26,7 @@ DEFAULT_SETTINGS = {
     "carbs": 200,
     "fat": 65,
     "food_header": "## Food",
+    "auth_enabled": False,
 }
 
 app = FastAPI(title="Calorie Tracker")
@@ -49,40 +52,40 @@ def init_db():
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS daily_log (
-                    date       TEXT PRIMARY KEY,
-                    analysis   TEXT NOT NULL,
-                    food_text  TEXT NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                CREATE TABLE IF NOT EXISTS users (
+                    id                          SERIAL PRIMARY KEY,
+                    name                        TEXT NOT NULL UNIQUE,
+                    password_hash               TEXT,
+                    obsidian_vault_path         TEXT,
+                    obsidian_daily_notes_folder TEXT NOT NULL DEFAULT 'Daily'
                 )
             """)
-
-
-def upsert_log(log_date: str, analysis: dict, food_text: str):
-    with get_db() as conn:
-        with conn.cursor() as cur:
+            # Add columns to existing tables if upgrading
+            for col, definition in [
+                ("obsidian_vault_path",         "TEXT"),
+                ("obsidian_daily_notes_folder", "TEXT NOT NULL DEFAULT 'Daily'"),
+            ]:
+                cur.execute(f"""
+                    ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {definition}
+                """)
             cur.execute("""
-                INSERT INTO daily_log (date, analysis, food_text, updated_at)
-                VALUES (%s, %s, %s, now())
-                ON CONFLICT (date) DO UPDATE SET
-                    analysis   = EXCLUDED.analysis,
-                    food_text  = EXCLUDED.food_text,
-                    updated_at = now()
-            """, (log_date, json.dumps(analysis), food_text))
-
-
-def get_history(limit: int = 30) -> list:
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT date, analysis FROM daily_log ORDER BY date DESC LIMIT %s",
-                (limit,),
-            )
-            rows = cur.fetchall()
-    return [
-        {"date": row["date"], "totals": json.loads(row["analysis"]).get("totals", {})}
-        for row in rows
-    ]
+                CREATE TABLE IF NOT EXISTS sessions (
+                    token      TEXT PRIMARY KEY,
+                    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS daily_log (
+                    id         SERIAL PRIMARY KEY,
+                    date       TEXT NOT NULL,
+                    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    analysis   TEXT NOT NULL,
+                    food_text  TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (date, user_id)
+                )
+            """)
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -97,13 +100,74 @@ def save_settings(data: dict):
     SETTINGS_PATH.write_text(json.dumps(data, indent=2))
 
 
+# ── Auth dependency ────────────────────────────────────────────────────────────
+
+def get_current_user(
+    x_user_id: Optional[str] = Header(None),
+    x_session_token: Optional[str] = Header(None),
+) -> int:
+    settings = load_settings()
+    if settings.get("auth_enabled"):
+        if not x_session_token:
+            raise HTTPException(401, "Authentication required")
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT user_id FROM sessions WHERE token = %s", (x_session_token,)
+                )
+                row = cur.fetchone()
+        if not row:
+            raise HTTPException(401, "Invalid or expired session")
+        return row["user_id"]
+    else:
+        if not x_user_id:
+            raise HTTPException(400, "No user selected")
+        try:
+            return int(x_user_id)
+        except ValueError:
+            raise HTTPException(400, "Invalid user id")
+
+
+# ── Data access ────────────────────────────────────────────────────────────────
+
+def upsert_log(log_date: str, user_id: int, analysis: dict, food_text: str):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO daily_log (date, user_id, analysis, food_text, updated_at)
+                VALUES (%s, %s, %s, %s, now())
+                ON CONFLICT (date, user_id) DO UPDATE SET
+                    analysis   = EXCLUDED.analysis,
+                    food_text  = EXCLUDED.food_text,
+                    updated_at = now()
+            """, (log_date, user_id, json.dumps(analysis), food_text))
+
+
+def get_history(user_id: int, limit: int = 30) -> list:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT date, analysis FROM daily_log WHERE user_id = %s ORDER BY date DESC LIMIT %s",
+                (user_id, limit),
+            )
+            rows = cur.fetchall()
+    return [
+        {"date": row["date"], "totals": json.loads(row["analysis"]).get("totals", {})}
+        for row in rows
+    ]
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
 @app.get("/")
 def root():
     return FileResponse("frontend/index.html")
 
 
+# Settings
+
 @app.get("/api/settings")
-def get_settings():
+def get_settings_route():
     return load_settings()
 
 
@@ -113,6 +177,111 @@ def put_settings(settings: dict):
     current.update(settings)
     save_settings(current)
     return current
+
+
+# Users
+
+class UserCreate(BaseModel):
+    name: str
+    password: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    user_id: int
+    password: str
+
+
+@app.get("/api/users")
+def list_users():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name FROM users ORDER BY name")
+            return [dict(r) for r in cur.fetchall()]
+
+
+@app.post("/api/users", status_code=201)
+def create_user(body: UserCreate):
+    pw_hash = bcrypt.hash(body.password) if body.password else None
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    "INSERT INTO users (name, password_hash) VALUES (%s, %s) RETURNING id, name",
+                    (body.name.strip(), pw_hash),
+                )
+                row = cur.fetchone()
+            except psycopg2.errors.UniqueViolation:
+                raise HTTPException(409, f"User '{body.name}' already exists")
+    return dict(row)
+
+
+@app.post("/api/auth/login")
+def login(body: LoginRequest):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, password_hash FROM users WHERE id = %s", (body.user_id,)
+            )
+            user = cur.fetchone()
+    if not user:
+        raise HTTPException(404, "User not found")
+    if not user["password_hash"] or not bcrypt.verify(body.password, user["password_hash"]):
+        raise HTTPException(401, "Incorrect password")
+    token = secrets.token_urlsafe(32)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO sessions (token, user_id) VALUES (%s, %s)",
+                (token, body.user_id),
+            )
+    return {"token": token}
+
+
+class UserUpdate(BaseModel):
+    obsidian_vault_path: Optional[str] = None
+    obsidian_daily_notes_folder: Optional[str] = None
+
+
+@app.get("/api/users/me")
+def get_me(user_id: int = Depends(get_current_user)):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, name, obsidian_vault_path, obsidian_daily_notes_folder FROM users WHERE id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "User not found")
+    return dict(row)
+
+
+@app.put("/api/users/me")
+def update_me(body: UserUpdate, user_id: int = Depends(get_current_user)):
+    updates = {}
+    if body.obsidian_vault_path is not None:
+        updates["obsidian_vault_path"] = body.obsidian_vault_path or None
+    if body.obsidian_daily_notes_folder is not None:
+        updates["obsidian_daily_notes_folder"] = body.obsidian_daily_notes_folder or "Daily"
+    if updates:
+        set_clause = ", ".join(f"{k} = %s" for k in updates)
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE users SET {set_clause} WHERE id = %s RETURNING id, name, obsidian_vault_path, obsidian_daily_notes_folder",
+                    [*updates.values(), user_id],
+                )
+                return dict(cur.fetchone())
+    return get_me(user_id)
+
+
+@app.post("/api/auth/logout")
+def logout(x_session_token: Optional[str] = Header(None)):
+    if x_session_token:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sessions WHERE token = %s", (x_session_token,))
+    return {"ok": True}
 
 
 # ── Note parsing ───────────────────────────────────────────────────────────────
@@ -166,7 +335,6 @@ def write_summary_to_note(vault_path: str, notes_folder: str, food_header: str, 
     lines = text.splitlines()
     header_lower = food_header.strip().lower()
 
-    # Find the food section start
     section_start = None
     for i, line in enumerate(lines):
         if line.strip().lower() == header_lower:
@@ -175,7 +343,6 @@ def write_summary_to_note(vault_path: str, notes_folder: str, food_header: str, 
     if section_start is None:
         return
 
-    # Find where the food section ends (next same-or-higher header)
     header_level = len(food_header) - len(food_header.lstrip("#"))
     section_end = len(lines)
     for i in range(section_start + 1, len(lines)):
@@ -186,7 +353,6 @@ def write_summary_to_note(vault_path: str, notes_folder: str, food_header: str, 
                 section_end = i
                 break
 
-    # Build summary block
     t = analysis["totals"]
     summary_lines = [
         SUMMARY_START,
@@ -195,7 +361,6 @@ def write_summary_to_note(vault_path: str, notes_folder: str, food_header: str, 
         SUMMARY_END,
     ]
 
-    # Strip any existing summary from within the section
     food_section = lines[section_start:section_end]
     cleaned = []
     inside = False
@@ -209,12 +374,10 @@ def write_summary_to_note(vault_path: str, notes_folder: str, food_header: str, 
         if not inside:
             cleaned.append(line)
 
-    # Drop trailing blank lines before appending summary
     while cleaned and not cleaned[-1].strip():
         cleaned.pop()
 
     updated_section = cleaned + [""] + summary_lines
-
     new_lines = lines[:section_start] + updated_section + lines[section_end:]
     note_path.write_text("\n".join(new_lines), encoding="utf-8")
 
@@ -261,16 +424,25 @@ def analyze_food(food_text: str) -> dict:
     return json.loads(raw)
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
+# ── Data endpoints ─────────────────────────────────────────────────────────────
 
 @app.get("/api/analyze")
-def analyze():
+def analyze(user_id: int = Depends(get_current_user)):
     settings = load_settings()
-    vault = os.getenv("OBSIDIAN_VAULT_PATH", "")
-    folder = os.getenv("OBSIDIAN_DAILY_NOTES_FOLDER", "Daily")
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT obsidian_vault_path, obsidian_daily_notes_folder FROM users WHERE id = %s",
+                (user_id,),
+            )
+            user = cur.fetchone()
+
+    vault = (user["obsidian_vault_path"] or "").strip() if user else ""
+    folder = (user["obsidian_daily_notes_folder"] or "Daily").strip() if user else "Daily"
 
     if not vault:
-        raise HTTPException(400, "OBSIDIAN_VAULT_PATH not set in .env")
+        raise HTTPException(400, "Obsidian vault path not set. Open Settings to configure it.")
 
     food_text = read_food_section(vault, folder, settings["food_header"])
     if food_text is None:
@@ -289,15 +461,15 @@ def analyze():
         raise HTTPException(500, str(e))
 
     log_date = date.today().isoformat()
-    upsert_log(log_date, result, food_text)
+    upsert_log(log_date, user_id, result, food_text)
     write_summary_to_note(vault, folder, settings["food_header"], result)
 
     return {"analysis": result, "date": log_date, "food_text": food_text}
 
 
 @app.get("/api/history")
-def history():
-    return get_history()
+def history(user_id: int = Depends(get_current_user)):
+    return get_history(user_id)
 
 
 init_db()
