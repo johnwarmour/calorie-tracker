@@ -223,13 +223,11 @@ def login(body: LoginRequest):
                 "SELECT id, password_hash FROM users WHERE id = %s", (body.user_id,)
             )
             user = cur.fetchone()
-    if not user:
-        raise HTTPException(404, "User not found")
-    if not user["password_hash"] or not bcrypt.verify(body.password, user["password_hash"]):
-        raise HTTPException(401, "Incorrect password")
-    token = secrets.token_urlsafe(32)
-    with get_db() as conn:
-        with conn.cursor() as cur:
+            if not user:
+                raise HTTPException(404, "User not found")
+            if not user["password_hash"] or not bcrypt.verify(body.password, user["password_hash"]):
+                raise HTTPException(401, "Incorrect password")
+            token = secrets.token_urlsafe(32)
             cur.execute(
                 "INSERT INTO sessions (token, user_id) VALUES (%s, %s)",
                 (token, body.user_id),
